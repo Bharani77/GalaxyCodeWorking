@@ -1,28 +1,4 @@
-const WebSocket = require('ws');
-const fs = require('fs');
-const { exec } = require('child_process');
-let socket;
-let isReconnecting = false;
-let flag = 0;
-let count = 0;
-let tempTime1 = 0;
-
-let config = {
-    RC: '',
-    AttackTime: 0,
-    DefenceTime: 0,
-    DefenceTime1: 0,
-    planetName: '',
-    interval: 0,
-    rival: []
-};
-
-function loadConfig() {
-    try {
-        const data = fs.readFileSync('config.json', 'utf8');
-        Object.assign(config, JSON.parse(data));
-        config.DefenceTime1 = config.DefenceTime - 50;
-        config.DefenceTime1 = config.DefenceTime;
+DefenceTime1 = config.DefenceTime;
         tempTime1 = config.AttackTime;
         console.log('Config updated:', config);
     } catch (err) {
@@ -55,19 +31,21 @@ function executeKillNodeScript() {
 async function handleError(error) {
     console.error("An error occurred:", error);
     
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.close();
-    }
+    // if (socket && socket.readyState === WebSocket.OPEN) {
+    //     socket.close();
+    // }
     
     try {
-        await executeKillNodeScript();
-        console.log("killNode.sh executed successfully");
+        await actions.reloadPage();
+      //  await executeKillNodeScript();
+      //  console.log("killNode.sh executed successfully");
     } catch (killError) {
         console.error("Failed to execute killNode.sh:", killError);
     }
 }
 
 function setupWebSocket() {
+    try{
     socket = new WebSocket('ws://localhost:8080');
 
     socket.onopen = async function() {
@@ -81,6 +59,7 @@ function setupWebSocket() {
     socket.onclose = function() {
         if (!isReconnecting) {
             console.log("WebSocket connection closed.");
+            handleError("Error");
             process.exit(1);
         }
     };
@@ -89,6 +68,9 @@ function setupWebSocket() {
         console.error("WebSocket Error:", error);
         handleError(error);
     };
+    }catch(error){
+        handleError(error);
+    }
 }
 
 async function sendMessage(message) {
@@ -123,6 +105,35 @@ async function sendMessage(message) {
 }
 
 const actions = {
+    switchToFrame: async (frameIndex, selectorType, selector) => {
+        try {
+          let response = await sendMessage({ action: 'switchToFrame', frameIndex, selectorType, selector });
+          console.log('Iframe src:', response);
+          return response;
+        } catch (error) {
+          console.error('Error in switchToFrame:', error);
+          throw error;
+        }
+      },
+      switchToFramePlanet: async (frameIndex, selectorType, selector) => {
+        try {
+          let response = await sendMessage({ action: 'switchToFramePlanet', frameIndex, selectorType, selector });
+          return response;
+        } catch (error) {
+          console.error('Error in switchToFramePlanet:', error);
+          throw error;
+        }
+      },
+      
+      switchToDefaultFrame: async (selector) => {
+        try {
+          let response = await sendMessage({ action: 'switchToDefaultFrame', selector });
+          return response;
+        } catch (error) {
+          console.error('Error in switchToDefaultFrame:', error);
+          throw error;
+        }
+      },
     click: (selector) => sendMessage({ action: 'click', selector }),
     xpath: (xpath) => sendMessage({ action: 'xpath', xpath }),
     enterRecoveryCode: (code) => sendMessage({ action: 'enterRecoveryCode', code }),
@@ -130,10 +141,23 @@ const actions = {
     scroll: (selector) => sendMessage({ action: 'scroll', selector }),
     pressShiftC: (selector) => sendMessage({ action: 'pressShiftC', selector }),
     waitForClickable: (selector) => sendMessage({ action: 'waitForClickable', selector }),
+    findAndClickByPartialText: async (text) => {
+        try {
+            let response = await sendMessage({ action: 'findAndClickByPartialText', text });
+            if (!response || !('flag' in response)) {
+                throw new Error('Flag not found in response');
+            }
+            return response;
+        } catch (error) {
+            console.error('Error in searchAndClick:', error);
+            throw error;
+        }
+    },
     reloadPage: async () => {
         isReconnecting = true;
         try {
             await sendMessage({ action: 'reloadPage' });
+            await waitForAllElements();
             console.log("Page reloaded and WebSocket reconnected");
         } catch (error) {
             console.error("Error during page reload:", error);
@@ -141,6 +165,7 @@ const actions = {
             isReconnecting = false;
         }
     },
+    
     searchAndClick: async (rivals) => {
         if (!Array.isArray(rivals)) throw new Error('rivals must be an array');
         try {
@@ -154,14 +179,55 @@ const actions = {
             throw error;
         }
     },
+    enhancedSearchAndClick: (position) => sendMessage({ action: 'enhancedSearchAndClick', position }),
     doubleClick: (selector) => sendMessage({ action: 'doubleClick', selector }),
     performSequentialActions: (actions) => sendMessage({ action: 'performSequentialActions', actions })
 };
+async function checkIfInPrison(planetName) {
+    try {
+        console.log("Checking if in prison...");
+        const result = await actions.findAndClickByPartialText(planetName);
+        console.log("Prison check result:", result);
+        if (!result.flag) {
+            await actions.waitForClickable('.planet-bar__button__action > img');
+            await actions.click('.mdc-button > .mdc-top-app-bar__title');
+            console.log("Prison element found and clicked");
+            return true;
+        } else {
+            console.log("Not in prison");
+            return false;
+        }
+    } catch (error) {
+        console.error("Error in checkIfInPrison:", error);
+        return false;
+    }
+}
+
+async function autoRelease() {
+    try {
+        await actions.xpath("//span[contains(.,'Planet Info')]");
+        await actions.sleep(2000);
+        await actions.switchToFrame(1,"css",".free__early__release:nth-child(2) .free__early__release__title");
+        await actions.sleep(1000);
+        await actions.switchToFrame(1,"css","#yes_btn > p");
+        await actions.sleep(1000); 
+        await actions.switchToDefaultFrame(".mdc-icon-button > img");
+        await actions.sleep(1000);
+        await actions.switchToFrame(1,"css",".s__gd__plank:nth-child(1) b");
+        await actions.sleep(1000);
+        await actions.switchToFramePlanet(2,"css","div.gc-action > a");
+
+        console.log("Auto-release successful");
+    } catch (error) {
+        console.error("Error in autoRelease:", error);
+        throw error;
+    }
+}
 
 async function executeRivalChecks(planetName) {
     try {
         await actions.xpath(`//span[contains(.,'${planetName}')]`);
-        await actions.click('.-list > .mdc-list-item:nth-child(3) > .mdc-list-item__text');
+        await actions.xpath(`//span[contains(.,'Online now')]`);
         return true;
     } catch (error) {
         if (error.message === "No matching name found") {
@@ -172,7 +238,6 @@ async function executeRivalChecks(planetName) {
         throw error;
     }
 }
-
 async function imprison() {
     await actions.click(".planet__events");
     await actions.click(".planet__events");
@@ -187,18 +252,47 @@ async function imprison() {
         { type: 'xpath', xpath: "//a[contains(.,'Exit')]" }
     ]);
     console.log("All actions completed successfully");
-    await actions.sleep(200);
+    await actions.sleep(250);
+   // await actions.reloadPage();
+    //await actions.click('.dialog__close-button > img');
     await actions.click('.start__user__nick');
+    
+
 }
 
+
+
+async function waitForElement(selector, maxAttempts = 5, interval = 50) {
+    for (let i = 0; i < maxAttempts; i++) {
+        try {
+            await actions.waitForClickable(selector);
+            return true;
+        } catch (error) {
+            if (i === maxAttempts - 1) throw error;
+            await new Promise(resolve => setTimeout(resolve, interval));
+        }
+    }
+    return false;
+}
 async function mainLoop() {
     while (true) {
        try{
         await actions.waitForClickable('.planet-bar__button__action > img');
         let loopStartTime = Date.now();
+        await actions.sleep(50);
+        const isInPrison = await checkIfInPrison(config.planetName);
+        if (isInPrison) {
+            console.log("In prison. Executing auto-release...");
+            await autoRelease();
+           // await actions.reloadPage();
+            await actions.waitForClickable('.planet-bar__button__action > img');
+            loopStartTime = Date.now();
+            continue; // Skip the rest of the loop and start over
+        }
         console.log(`New loop iteration started at: ${loopStartTime}`);
-        await actions.sleep(100);
+        await actions.sleep(50);
         //await actions.scroll('.mdc-drawer__content');
+        //await waitForElement(`//span[contains(.,'${config.planetName}')]`);
         await executeRivalChecks(config.planetName);
         //Here using fetch will pass the rival user id and check if rival present or not.
         await actions.sleep(100);
@@ -209,14 +303,16 @@ async function mainLoop() {
             let rivalFoundTime = Date.now();
             let elapsedTime = rivalFoundTime - loopStartTime;
             console.log(`Time elapsed since loop start: ${elapsedTime}ms`);
-
             if (config.AttackTime < config.DefenceTime && flag !== 1) {
                 config.AttackTime = tempTime1 + count;
                 count += config.interval;
                 config.AttackTime -= 50;
                 console.log("count: " + count);
                 console.log("Current Attack Time: " + config.AttackTime);
-                
+               // await actions.enhancedSearchAndClick(config.rival, 'second');
+              //  await actions.click(".planet__events");
+               // await actions.click(".planet__events");
+              //  await actions.click(".planet__events");
                 let adjustedAttackTime = Math.max(0, config.AttackTime - elapsedTime);
                 console.log(`Adjusted AttackTime: ${adjustedAttackTime}ms`);
                 
@@ -238,12 +334,12 @@ async function mainLoop() {
                     count = 0;
                 }
             } else if (config.AttackTime < config.DefenceTime1 && flag === 1) {
-                config.AttackTime = tempTime1 - 50 + count;
+                config.AttackTime = tempTime1 - count;
               //  config.AttackTime = tempTime1 + count;
                 count += config.interval;
                 config.AttackTime -= 50;
                 
-                let adjustedAttackTime = Math.max(0, config.AttackTime + elapsedTime);
+                let adjustedAttackTime = Math.max(0, config.AttackTime - elapsedTime);
                 console.log(`Adjusted AttackTime: ${adjustedAttackTime}ms`);
                 
                 if (adjustedAttackTime > 0) {

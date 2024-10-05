@@ -9,8 +9,9 @@ let page;
 async function setupBrowser() {
   console.log('Launching browser...');
   try {
-     /* const browser = await puppeteer.launch({
-      headless: "new",
+    /*
+      const browser = await puppeteer.launch({
+      headless: false,
       defaultViewport: null
   });*/
      
@@ -35,11 +36,26 @@ async function setupBrowser() {
         '--metrics-recording-only',
         '--mute-audio',
         '--no-default-browser-check',
+        '--start-maximized'
       ], 
     });
-
     page = await browser.newPage();
     console.log('New page created');
+
+    const maxViewport = await page.evaluate(() => {
+      return {
+        width: window.screen.availWidth,
+        height: window.screen.availHeight,
+      };
+    });
+    await page.setViewport(maxViewport);
+
+    // Enter full screen mode
+    await page.evaluate(() => {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen();
+      }
+    });
 
     const client = await page.target().createCDPSession();
     await Promise.all([
@@ -106,6 +122,64 @@ wss.on('connection', function connection(ws) {
     }
 
     const actions = {
+      async switchToFrame() {
+        const frames = await page.frames();
+      
+        if (data.frameIndex <= frames.length && data.frameIndex >= 0) {
+          await page.evaluate((index, selType, sel) => {
+            const iframe = document.querySelectorAll('iframe')[index];
+            let contentElement;
+            if (selType === 'xpath}') {
+              contentElement = iframe.contentDocument.evaluate(sel, iframe.contentDocument, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            } else if (selType === 'css') {
+              contentElement = iframe.contentDocument.querySelector(sel);
+            }
+      
+            if (contentElement) {
+              contentElement.click();
+            } else {
+              throw new Error('Element not found');
+            }
+          }, data.frameIndex, data.selectorType, data.selector);
+          return { status: 'success', action: 'switchToFrame', message: data.frameIndex };
+        }
+      
+        return { status: 'error', action: 'switchToFrame', message: 'Frame index out of range' };
+      },
+      async switchToFramePlanet() {
+        await page.mainFrame();
+        const frames = await page.frames();
+        if (data.frameIndex <= frames.length && data.frameIndex >= 0) {
+          await page.evaluate((index, selType, sel) => {
+            const iframe = document.querySelectorAll('iframe')[index];
+            let contentElement;
+            if (selType === 'xpath}') {
+              contentElement = iframe.contentDocument.evaluate(sel, iframe.contentDocument, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            } else if (selType === 'css') {
+              contentElement = iframe.contentDocument.querySelector(sel);
+            }
+            if (contentElement) {
+              contentElement.click();
+              this.reloadPage();
+            } else {
+              throw new Error('Element not found');
+            }
+          }, data.frameIndex, data.selectorType, data.selector);
+          return { status: 'success', action: 'switchToDefaultFrame', message: "Successfully clicked" };
+        }
+      },
+      
+      async switchToDefaultFrame() {
+        const frames = await page.mainFrame();
+          await page.evaluate(async (sel) => {
+            const element = document.querySelector(sel);
+            if (element) {
+              element.click();
+            }
+            return { success: false, message: 'Element not found' };
+          }, data.selector);
+          return { status: 'success', action: 'switchToDefaultFrame', message: "Successfully clicked" };
+        },
       async doubleClick() {
         try {
           await page.waitForSelector(data.selector, { timeout: 500 });
@@ -127,6 +201,8 @@ wss.on('connection', function connection(ws) {
           throw new Error(`Error double-clicking element ${data.selector}: ${error.message}`);
         }
       },
+
+      
       async click() {
         try {
           await page.waitForSelector(data.selector, { timeout: 500 });
@@ -136,7 +212,10 @@ wss.on('connection', function connection(ws) {
           throw new Error(`Error with element ${data.selector}: ${error.message}`);
         }
       },
-
+      async enhancedSearchAndClick() {
+        return await enhancedSearchAndClick(data.position);
+      },
+    
       async searchAndClick() {
         let rivals = data.rivals;
         if (!Array.isArray(rivals)) {
@@ -200,6 +279,26 @@ wss.on('connection', function connection(ws) {
         return { status: 'success', action: 'waitForClickable', selector: data.selector };
       },
 
+      async findAndClickByPartialText() {
+        const xpathExpression = `//span[contains(text(), "${data.text}")]`;
+        const clickResult = await page.evaluate((xpath) => {
+            const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            if (element) {
+                // element.click(); // Uncomment if you want to click the element
+                return { success: true, message: 'Element found', flag: true };
+            } else {
+                return { success: false, message: 'Element not found', flag: false };
+            }
+        }, xpathExpression);
+        
+        return { 
+            status: 'success', 
+            action: 'findAndClickByPartialText', 
+            selector: xpathExpression, 
+            flag: clickResult.flag // Use clickResult.flag here
+        };
+    },    
+      
       async xpath() {
         const clickResult = await page.evaluate((xpath) => {
           const element = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
@@ -289,6 +388,52 @@ wss.on('connection', function connection(ws) {
 
   ws.on('close', () => console.log('Client disconnected'));
 });
+
+async function enhancedSearchAndClick(position) {
+  try {
+    await page.waitForSelector('li', { timeout: 500 });
+    const result = await page.evaluate((position) => {
+      let elements = document.querySelectorAll('li');
+      
+      if (elements.length === 0) {
+        return { found: false };
+      }
+
+      let elementToClick;
+      if (position === 'second' && elements.length >= 2) {
+        elementToClick = elements[2];
+      } else if (position === 'last') {
+        elementToClick = elements[elements.length - 1];
+      } else {
+        return { found: false };
+      }
+
+      elementToClick.click();
+      return { 
+        found: true, 
+        text: elementToClick.textContent.trim(),
+        position: position
+      };
+    }, position);
+
+    if (!result.found) {
+      await page.click('.dialog__close-button > img');
+    }
+
+    return {
+      status: 'success',
+      action: 'enhancedSearchAndClick',
+      message: result.found 
+        ? `Clicked ${result.position} element with text: ${result.text}` 
+        : `No ${position} element found, clicked alternative button`,
+      flag: result.found,
+      clickedText: result.text || "N/A",
+      position: result.position
+    };
+  } catch (error) {
+    throw new Error(`Error in enhancedSearchAndClick: ${error.message}`);
+  }
+}
 
 console.log('WebSocket server started on port 8080');
 
