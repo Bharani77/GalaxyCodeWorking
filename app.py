@@ -28,13 +28,14 @@ def start_test_js():
     global test_process
     if not test_process or test_process.poll() is not None:
         test_process = subprocess.Popen(['node', 'test.js'])
-    time.sleep(2)  # Give some time for the WebSocket server to start
+    time.sleep(5)  # Give some time for the WebSocket server to start
 
 @app.route('/start', methods=['POST'])
 def start_galaxy():
     global galaxy_process
     data = request.json
     write_config(data)
+    time.sleep(5)
     
     # Start test.js if it's not already running
     start_test_js()

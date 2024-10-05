@@ -1,4 +1,28 @@
-DefenceTime1 = config.DefenceTime;
+const WebSocket = require('ws');
+const fs = require('fs');
+const { exec } = require('child_process');
+let socket;
+let isReconnecting = false;
+let flag = 0;
+let count = 0;
+let tempTime1 = 0;
+
+let config = {
+    RC: '',
+    AttackTime: 0,
+    DefenceTime: 0,
+    DefenceTime1: 0,
+    planetName: '',
+    interval: 0,
+    rival: []
+};
+
+function loadConfig() {
+    try {
+        const data = fs.readFileSync('config.json', 'utf8');
+        Object.assign(config, JSON.parse(data));
+        config.DefenceTime1 = config.DefenceTime - 50;
+        config.DefenceTime1 = config.DefenceTime;
         tempTime1 = config.AttackTime;
         console.log('Config updated:', config);
     } catch (err) {
@@ -252,7 +276,7 @@ async function imprison() {
         { type: 'xpath', xpath: "//a[contains(.,'Exit')]" }
     ]);
     console.log("All actions completed successfully");
-    await actions.sleep(250);
+    await actions.sleep(225);
    // await actions.reloadPage();
     //await actions.click('.dialog__close-button > img');
     await actions.click('.start__user__nick');
