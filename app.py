@@ -14,9 +14,9 @@ test_process = None
 
 def write_config(data):
     config = {
-        "RC": data['rc'],
-        "AttackTime": int(data['attackTime']),
-        "DefenceTime": int(data['defenceTime']),
+        "RC": data['RC'],
+        "AttackTime": int(data['AttackTime']),
+        "DefenceTime": int(data['DefenceTime']),
         "planetName": data['planetName'],
         "interval": int(data['intervalTime']),
         "rival": data['rival'].split(',')
@@ -64,19 +64,27 @@ def stop_galaxy():
     global galaxy_process, test_process
     if galaxy_process:
         galaxy_process.terminate()
-        galaxy_process.wait()
+       # galaxy_process.wait()
         galaxy_process = None
     if test_process:
         test_process.terminate()
-        test_process.wait()
+       # test_process.wait()
         test_process = None
-    return jsonify({"message": "Galaxy.js and Test.js stopped successfully"}), 200
+    
+    # Execute killNode.sh
+    try:
+        subprocess.run(['bash', 'killNode.sh'], check=True)
+        return jsonify({"message": "Galaxy.js and Test.js stopped successfully, and killNode.sh executed"}), 200
+    except subprocess.CalledProcessError as e:
+        return jsonify({"message": f"Error executing killNode.sh: {str(e)}"}), 500
 
 def cleanup():
     if galaxy_process:
         galaxy_process.terminate()
     if test_process:
         test_process.terminate()
+    # Execute killNode.sh during cleanup as well
+    subprocess.run(['bash', 'killNode.sh'], check=False)
 
 if __name__ == '__main__':
     # Register cleanup function to be called on exit
